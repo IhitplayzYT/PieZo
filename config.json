@@ -1,0 +1,21 @@
+{
+  "body_font_size": 12,
+  "header_font_size": 16,
+  "margin_px": 4,
+  "dither_threshold_offset": 0,
+  "default_bold": false,
+  "button_map": {
+    "up": "GPIO13",
+    "down": "GPIO12",
+    "left": "GPIO14",
+    "right": "GPIO27",
+    "center": "GPIO26",
+    "enc1_push": "GPIO25",
+    "enc2_push": "GPIO22"
+  },
+  "bookmarks": {},
+  "last_read": {
+    "book_id": "Clown - LotM Vol. 1",
+    "page": 0
+  }
+}

@@ -14,6 +14,7 @@ import socket
 # ---------------- PATHS ----------------
 BOOKS_DIR = "books"  # Dir where u drop epubs into
 CONFIG_PATH = "config.json" # Dir to store settings
+BITMAP_CACHE_DIR = "bitmap_cache"
 
 # ---------------- DISPLAY DIMS ----------------
 PAGE_WIDTH = 296
@@ -32,7 +33,6 @@ DEFAULT_LINE_SPACING_PX = 2
 DEFAULT_DITHER_THRESHOLD_OFFSET = 0  # -255..255, biases dither darker/lighter
 DITHER_THRESHOLD_STEP = 16  # per encoder tick from ESP32's ENCMODE_BRIGHTNESS
 PARAGRAPH_GAP_PX = 4
-
 # ---------------- SETTINGS MENU CONSTS ----------------
 SETTINGS_MENU_TREE = {
     "root": {
@@ -401,6 +401,32 @@ def pack_bitmap(pil_image_1bit):
                 out[byte_idx] |= (0x80 >> (col % 8))
     return bytes(out)
 
+def bitmap_cache_path(book_id, page_num, cfg):
+    # cache key includes render-affecting settings so changing font size etc. invalidates old cache
+    sig = "%d_%d_%d_%d_%d" % (
+        cfg["body_font_size"], cfg["header_font_size"],
+        cfg["margin_px"], int(cfg["default_bold"]),
+        cfg["dither_threshold_offset"]
+    )
+    safe_id = book_id.replace("/", "_").replace(" ", "_")
+    return os.path.join(BITMAP_CACHE_DIR, f"{safe_id}__p{page_num}__{sig}.bin")
+
+
+def load_bitmap_cache(book_id, page_num, cfg):
+    path = bitmap_cache_path(book_id, page_num, cfg)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) == BITMAP_BYTES:
+            return data
+    return None
+
+
+def save_bitmap_cache(book_id, page_num, cfg, bitmap_bytes):
+    os.makedirs(BITMAP_CACHE_DIR, exist_ok=True)
+    path = bitmap_cache_path(book_id, page_num, cfg)
+    with open(path, "wb") as f:
+        f.write(bitmap_bytes)
 
 # ============================================================
 # Book cache — parses + paginates on first access, re-paginates if render-affecting settings change
@@ -461,6 +487,11 @@ def ensure_page_exists(book_data, page_num, cfg):
 
 
 def render_book_page(book_id, page_num, cfg):
+    # cache hit — skip all rendering entirely
+    cached = load_bitmap_cache(book_id, page_num, cfg)
+    if cached:
+        return cached
+
     book_data = ensure_book_loaded(book_id, cfg)
     if not book_data:
         return None
@@ -469,7 +500,10 @@ def render_book_page(book_id, page_num, cfg):
     if page_num < 0 or page_num >= len(pages):
         return None
     bw = render_page_image(pages[page_num]["render_ops"], book_data["epub_path"], cfg)
-    return pack_bitmap(bw)
+    bitmap = pack_bitmap(bw)
+    save_bitmap_cache(book_id, page_num, cfg, bitmap)
+    return bitmap
+
 # ============================================================
 # Settings menu rendering — same Pillow pipeline as book pages, per spec addendum
 # ============================================================
@@ -633,7 +667,8 @@ def get_button_map():
 
 # Main
 def main():
-    os.makedirs(BOOKS_DIR, exist_ok=True)
+    os.makedirs(BOOKS_DIR, exist_ok=True)    
+    os.makedirs(BITMAP_CACHE_DIR, exist_ok=True) 
     if not os.path.exists(CONFIG_PATH):
         save_config(DEFAULT_CONFIG)
     zc = advertise_mdns()
